@@ -393,7 +393,11 @@ async function callOllamaLocal(prompt, agentContext = '') {
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         prompt: fullPrompt,
-        stream: false
+        stream: false,
+        options: {
+          num_predict: 512,
+          temperature: 0.8
+        }
       })
     });
     if (!res.ok) {

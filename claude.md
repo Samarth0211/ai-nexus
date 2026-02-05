@@ -272,14 +272,29 @@ git reset --hard checkpoint-name
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `LLM_PROVIDER` | Provider mode | `ollama` |
+| `LLM_PROVIDER` | Provider mode | `auto` |
 | `OLLAMA_MODEL` | Ollama model name | `llama3.1:latest` |
 | `OLLAMA_URL` | Ollama API URL | `http://host.docker.internal:11434` |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID | - |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token | - |
 | `GROQ_API_KEY` | Groq API key | - |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
 | `TOGETHER_API_KEY` | Together.ai API key | - |
 | `HUGGINGFACE_API_KEY` | HuggingFace API key | - |
 | `ENCRYPTION_KEY` | 32-char key for API encryption | auto-generated |
+
+## LLM Providers (Free Tiers)
+
+| Provider | Free Tier | Speed | Get Key |
+|----------|-----------|-------|---------|
+| **Cloudflare** | 10k neurons/day | Fast | [dash.cloudflare.com](https://dash.cloudflare.com) |
+| **Groq** | 30 req/min, 500k tokens/day | Fastest | [console.groq.com](https://console.groq.com) |
+| **Gemini** | 15 req/min, 1500 req/day | Fast | [makersuite.google.com](https://makersuite.google.com/app/apikey) |
+| **Together** | Free credits on signup | Medium | [api.together.xyz](https://api.together.xyz) |
+| **HuggingFace** | Rate limited | Slow | [huggingface.co](https://huggingface.co/settings/tokens) |
+| **Ollama** | Unlimited (local) | Depends on hardware | [ollama.com](https://ollama.com) |
+
+In `auto` mode, providers are tried in order with smart rate limit rotation.
 
 ## Troubleshooting
 
@@ -309,6 +324,11 @@ git reset --hard checkpoint-name
 docker-compose up -d --force-recreate agents
 ```
 
+### Rate limit errors
+- In `auto` mode, providers automatically rotate when rate limited
+- Check which providers are configured: logs show `[Rate Limit] provider rate limited`
+- Add more provider API keys for better availability
+
 ## Deployment Options
 
 ### Local Development
@@ -317,18 +337,87 @@ docker-compose up -d
 # Access at http://localhost (frontend) and http://localhost:3001 (API)
 ```
 
-### Production (Oracle Cloud Free Tier - Recommended)
-- 4 ARM A1 cores, 24GB RAM (always free)
-- Can run Ollama locally on the server
-- Full Docker Compose deployment
+### Production (Oracle Cloud Free Tier - Recommended for Ollama)
 
-### Production (Railway/Render)
-- Requires cloud LLM provider (Groq recommended)
-- Set `LLM_PROVIDER=groq` and add `GROQ_API_KEY`
+Oracle Cloud offers **always-free** ARM VMs perfect for running Ollama:
+
+1. **Sign up** at [cloud.oracle.com](https://cloud.oracle.com) (credit card for verification only)
+
+2. **Create VM**: Compute > Instances > Create
+   - Shape: VM.Standard.A1.Flex (4 OCPUs, 24GB RAM)
+   - Image: Ubuntu 22.04
+   - Add SSH key
+
+3. **Setup server**:
+   ```bash
+   # SSH into your VM
+   ssh ubuntu@<your-vm-ip>
+
+   # Install Docker
+   curl -fsSL https://get.docker.com | sh
+   sudo usermod -aG docker $USER
+
+   # Install Ollama
+   curl -fsSL https://ollama.com/install.sh | sh
+   ollama pull llama3.1:latest
+
+   # Clone and run
+   git clone <your-repo>
+   cd ai-blogger
+
+   # Create .env
+   cat > .env << 'EOF'
+   LLM_PROVIDER=ollama
+   OLLAMA_URL=http://localhost:11434
+   OLLAMA_MODEL=llama3.1:latest
+   EOF
+
+   # Start services
+   docker-compose up -d
+   ```
+
+4. **Open firewall**: Networking > Virtual Cloud Networks > Security Lists
+   - Add ingress rules for ports 80 (HTTP) and 3001 (API)
+
+### Production (Railway - No Local Compute)
+
+1. **Push to GitHub**: Push your code to a GitHub repository
+
+2. **Create Railway project**: [railway.app](https://railway.app)
+   - New Project > Deploy from GitHub repo
+
+3. **Configure environment**:
+   ```env
+   LLM_PROVIDER=auto
+   GROQ_API_KEY=gsk_...
+   GEMINI_API_KEY=AIza...
+   ```
+
+4. **Deploy**: Railway auto-deploys on push
+
+### Production (Render - Free Tier)
+
+1. **Create services** at [render.com](https://render.com):
+   - **Frontend**: Static Site from `frontend/`
+   - **Backend**: Web Service from `backend/`
+   - **Agents**: Background Worker from `agents/`
+
+2. **Configure environment** on each service:
+   ```env
+   LLM_PROVIDER=auto
+   GROQ_API_KEY=gsk_...
+   API_URL=https://your-backend.onrender.com
+   ```
 
 ## Version History
 
-### Current (v2.0 - Multi-User Dashboard)
+### Current (v2.1 - Multi-Provider Support)
+- Cloudflare Workers AI integration
+- Smart rate limit rotation across providers
+- Enhanced provider fallback chain
+- Better error handling and logging
+
+### v2.0 - Multi-User Dashboard
 - User authentication system
 - Multi-agent dashboard per user
 - Encrypted API key storage
@@ -337,3 +426,17 @@ docker-compose up -d
 - Agent creation by agents
 - 8 specialized agent types
 - Welcome popup for new visitors
+
+## Checkpoints
+
+To revert to a previous version:
+```bash
+# List available checkpoints
+git tag -l
+
+# Revert to checkpoint
+git checkout v2.0-checkpoint
+
+# Or reset completely
+git reset --hard v2.0-checkpoint
+```

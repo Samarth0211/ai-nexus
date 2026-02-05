@@ -9,9 +9,52 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || '';
 const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || '';
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || '';
 
-// Model provider preference: groq > gemini > together > huggingface > ollama
+// Model provider preference: cloudflare > groq > gemini > together > huggingface > ollama
 const LLM_PROVIDER = process.env.LLM_PROVIDER || 'auto';
+
+// Rate limit tracking for all providers
+const providerStatus = {
+  cloudflare: { rateLimited: false, resetTime: 0, requestCount: 0, dailyReset: Date.now() },
+  groq: { rateLimited: false, resetTime: 0 },
+  gemini: { rateLimited: false, resetTime: 0, requestCount: 0, dailyReset: Date.now() },
+  together: { rateLimited: false, resetTime: 0 },
+  huggingface: { rateLimited: false, resetTime: 0 }
+};
+
+// Check and reset daily counters
+function checkDailyReset(provider) {
+  const status = providerStatus[provider];
+  const now = Date.now();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  if (now - status.dailyReset > oneDayMs) {
+    status.requestCount = 0;
+    status.dailyReset = now;
+    status.rateLimited = false;
+  }
+}
+
+// Mark provider as rate limited
+function markRateLimited(provider, durationMs = 60 * 60 * 1000) {
+  providerStatus[provider].rateLimited = true;
+  providerStatus[provider].resetTime = Date.now() + durationMs;
+  log(`[Rate Limit] ${provider} rate limited for ${Math.round(durationMs / 60000)} minutes`);
+}
+
+// Check if provider is available
+function isProviderAvailable(provider) {
+  const status = providerStatus[provider];
+  if (!status) return true;
+  if (status.rateLimited && Date.now() < status.resetTime) {
+    return false;
+  }
+  if (status.rateLimited && Date.now() >= status.resetTime) {
+    status.rateLimited = false;
+  }
+  return true;
+}
 
 let agents = [];
 let groups = [];
@@ -278,6 +321,60 @@ async function callHuggingFace(prompt, agentContext = '') {
   return null;
 }
 
+// Cloudflare Workers AI (free tier: 10,000 neurons/day)
+async function callCloudflare(prompt, agentContext = '') {
+  if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) return null;
+
+  checkDailyReset('cloudflare');
+  if (!isProviderAvailable('cloudflare')) return null;
+
+  // Models available on Cloudflare Workers AI
+  const models = [
+    '@cf/meta/llama-3.1-8b-instruct',
+    '@cf/meta/llama-2-7b-chat-fp16',
+    '@cf/mistral/mistral-7b-instruct-v0.1'
+  ];
+
+  for (const model of models) {
+    try {
+      const res = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`
+          },
+          body: JSON.stringify({
+            messages: [
+              { role: 'system', content: agentContext || 'You are a helpful AI assistant.' },
+              { role: 'user', content: prompt }
+            ],
+            max_tokens: 512
+          })
+        }
+      );
+
+      if (res.status === 429) {
+        markRateLimited('cloudflare', 60 * 60 * 1000); // 1 hour
+        return null;
+      }
+
+      if (!res.ok) continue;
+
+      const data = await res.json();
+      if (data.success && data.result?.response) {
+        providerStatus.cloudflare.requestCount++;
+        return data.result.response;
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 // Local Ollama
 async function callOllamaLocal(prompt, agentContext = '') {
   const fullPrompt = agentContext ? `${agentContext}\n\n${prompt}` : prompt;
@@ -303,45 +400,52 @@ async function callOllamaLocal(prompt, agentContext = '') {
   }
 }
 
-// Unified LLM caller - tries providers in order of preference
+// Unified LLM caller - tries providers in order of preference with smart rotation
 async function callLLM(prompt, agentContext = '') {
   const provider = LLM_PROVIDER.toLowerCase();
 
   // If specific provider is set, use only that
+  if (provider === 'cloudflare') return callCloudflare(prompt, agentContext);
   if (provider === 'groq') return callGroq(prompt, agentContext);
   if (provider === 'gemini') return callGemini(prompt, agentContext);
   if (provider === 'together') return callTogether(prompt, agentContext);
   if (provider === 'huggingface') return callHuggingFace(prompt, agentContext);
   if (provider === 'ollama') return callOllamaLocal(prompt, agentContext);
 
-  // Auto mode: try providers in order
+  // Auto mode: try providers in order with rate limit awareness
   let result = null;
 
-  // Try Groq first (fastest, generous free tier)
-  if (GROQ_API_KEY) {
+  // Try Cloudflare first (10k free requests/day, fast)
+  if (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN && isProviderAvailable('cloudflare')) {
+    result = await callCloudflare(prompt, agentContext);
+    if (result) return result;
+  }
+
+  // Try Groq (fastest, generous free tier)
+  if (GROQ_API_KEY && isProviderAvailable('groq')) {
     result = await callGroq(prompt, agentContext);
     if (result) return result;
   }
 
   // Try Gemini (very reliable, generous free tier)
-  if (GEMINI_API_KEY) {
+  if (GEMINI_API_KEY && isProviderAvailable('gemini')) {
     result = await callGemini(prompt, agentContext);
     if (result) return result;
   }
 
   // Try Together AI
-  if (TOGETHER_API_KEY) {
+  if (TOGETHER_API_KEY && isProviderAvailable('together')) {
     result = await callTogether(prompt, agentContext);
     if (result) return result;
   }
 
   // Try HuggingFace
-  if (HUGGINGFACE_API_KEY) {
+  if (HUGGINGFACE_API_KEY && isProviderAvailable('huggingface')) {
     result = await callHuggingFace(prompt, agentContext);
     if (result) return result;
   }
 
-  // Fall back to local Ollama
+  // Fall back to local Ollama (always available if running)
   return callOllamaLocal(prompt, agentContext);
 }
 

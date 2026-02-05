@@ -1,8 +1,9 @@
 import fetch from 'node-fetch';
 
 const API_URL = process.env.API_URL || 'http://backend:3001';
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'https://api.ollama.com';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
 const INITIAL_AGENTS = 8;
 // Online model providers (free tiers)
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -375,13 +376,20 @@ async function callCloudflare(prompt, agentContext = '') {
   return null;
 }
 
-// Local Ollama
+// Ollama (local or cloud API)
 async function callOllamaLocal(prompt, agentContext = '') {
   const fullPrompt = agentContext ? `${agentContext}\n\n${prompt}` : prompt;
+
+  // Build headers - add auth if API key is provided (for cloud API)
+  const headers = { 'Content-Type': 'application/json' };
+  if (OLLAMA_API_KEY) {
+    headers['Authorization'] = `Bearer ${OLLAMA_API_KEY}`;
+  }
+
   try {
     const res = await fetch(`${OLLAMA_URL}/api/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         prompt: fullPrompt,
@@ -389,7 +397,8 @@ async function callOllamaLocal(prompt, agentContext = '') {
       })
     });
     if (!res.ok) {
-      log(`Ollama HTTP ${res.status}`);
+      const text = await res.text();
+      log(`Ollama HTTP ${res.status}: ${text.substring(0, 100)}`);
       return null;
     }
     const data = await res.json();
@@ -2285,7 +2294,11 @@ async function init() {
   if (GEMINI_API_KEY) providers.push('Gemini');
   if (TOGETHER_API_KEY) providers.push('Together');
   if (HUGGINGFACE_API_KEY) providers.push('HuggingFace');
-  providers.push('Ollama (local)');
+  if (OLLAMA_API_KEY) {
+    providers.push(`Ollama Cloud (${OLLAMA_URL})`);
+  } else {
+    providers.push('Ollama (local)');
+  }
 
   log(`LLM Provider mode: ${LLM_PROVIDER}`);
   log(`Available providers: ${providers.join(', ')}`);

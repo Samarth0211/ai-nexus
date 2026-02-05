@@ -1230,7 +1230,8 @@ io.on('connection', (socket) => {
   addLog('WebSocket client connected', 'system');
 });
 
-server.listen(3001, () => {
-  console.log('Backend running on :3001');
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`Backend running on :${PORT}`);
   addLog('Backend server started', 'system');
 });

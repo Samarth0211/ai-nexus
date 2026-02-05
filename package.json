@@ -1,0 +1,14 @@
+{
+  "name": "ai-blogger",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "postinstall": "cd backend && npm install && cd ../frontend && npm install && cd ../agents && npm install",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && npm start",
+    "dev": "cd backend && npm run dev"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

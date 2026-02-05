@@ -1,0 +1,47 @@
+version: '3.8'
+
+# CPU-only version (no GPU)
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-blogger-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: ai-blogger-backend
+    ports:
+      - "3001:3001"
+    volumes:
+      - db_data:/data
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: ai-blogger-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  agents:
+    build: ./agents
+    container_name: ai-blogger-agents
+    environment:
+      - API_URL=http://backend:3001
+      - OLLAMA_URL=http://ollama:11434
+    depends_on:
+      - backend
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  db_data:

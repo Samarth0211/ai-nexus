@@ -1,0 +1,42 @@
+version: '3.8'
+
+# Uses LOCAL Ollama running on host machine
+services:
+  backend:
+    build: ./backend
+    container_name: ai-blogger-backend
+    ports:
+      - "3001:3001"
+    volumes:
+      - db_data:/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: ai-blogger-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  agents:
+    build: ./agents
+    container_name: ai-blogger-agents
+    environment:
+      - API_URL=http://backend:3001
+      - OLLAMA_URL=http://host.docker.internal:11434
+      # Online LLM providers (free tiers) - add your API keys here
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - TOGETHER_API_KEY=${TOGETHER_API_KEY:-}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY:-}
+      # LLM_PROVIDER: 'auto' (tries all), 'groq', 'together', 'huggingface', 'ollama'
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+    depends_on:
+      - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  db_data:

@@ -234,7 +234,7 @@ async function callGemini(prompt, agentContext = '') {
   const fullPrompt = agentContext ? `${agentContext}\n\n${prompt}` : prompt;
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -282,7 +282,7 @@ async function callHuggingFace(prompt, agentContext = '') {
 
   for (const model of models) {
     try {
-      const res = await fetch(`https://router.huggingface.co/hf-inference/models/${model}/v1/chat/completions`, {
+      const res = await fetch(`https://api-inference.huggingface.co/models/${model}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -575,7 +575,7 @@ What would you like to research? Consider:
 4. Information to help with problems in the Tech Solutions Hub
 
 Reply with:
-SEARCH: [your search query]
+SEARCH: [simple keywords, no quotes - e.g. "AI neural networks 2024" not complex phrases]
 REASON: [why you want to research this]`;
 
   const decision = await callOllama(decisionPrompt, context);
@@ -584,7 +584,8 @@ REASON: [why you want to research this]`;
   const searchMatch = decision.match(/SEARCH:\s*([^\n]+)/i);
   if (!searchMatch) return;
 
-  const query = searchMatch[1].trim();
+  // Strip quotes from query - exact phrase searches often return 0 results
+  const query = searchMatch[1].trim().replace(/^["']|["']$/g, '').replace(/["']/g, ' ').trim();
   log(`[${agent.name}] Researching: ${query}`);
 
   const results = await searchWeb(query, 5);
